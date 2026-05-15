@@ -2,64 +2,91 @@ import streamlit as st
 import os
 import google.generativeai as genai
 
-from langchain.document_loaders import PyPDFLoader
+from langchain_community.document_loaders import PyPDFLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain.vectorstores import FAISS
+from langchain_community.vectorstores import FAISS
 from langchain.embeddings.base import Embeddings
 
 
 # -----------------------------
-# Gemini Setup
+# Streamlit Config
 # -----------------------------
-API_KEY = st.sidebar.text_input("Gemini API Key", type="password")
+st.set_page_config(
+    page_title="Kisan Saathi",
+    page_icon="🌾",
+    layout="wide"
+)
 
-if not API_KEY:
-    st.warning("Enter Gemini API Key")
-    st.stop()
+st.title("🌾 Kisan Saathi")
+st.subheader("AI Agriculture Assistant for Indian Farmers")
+
+
+# -----------------------------
+# Gemini API Key
+# -----------------------------
+API_KEY = st.secrets["GEMINI_API_KEY"]
 
 genai.configure(api_key=API_KEY)
+
 model = genai.GenerativeModel("gemini-1.5-flash")
 
 
 # -----------------------------
-# Custom Gemini Embedding Class
+# Gemini Embeddings
 # -----------------------------
 class GeminiEmbeddings(Embeddings):
+
     def embed_documents(self, texts):
-        return [
-            genai.embed_content(
+        embeddings = []
+
+        for text in texts:
+            response = genai.embed_content(
                 model="models/embedding-001",
                 content=text
-            )["embedding"]
-            for text in texts
-        ]
+            )
+            embeddings.append(response["embedding"])
+
+        return embeddings
 
     def embed_query(self, text):
-        return genai.embed_content(
+        response = genai.embed_content(
             model="models/embedding-001",
             content=text
-        )["embedding"]
+        )
+
+        return response["embedding"]
 
 
 embedding = GeminiEmbeddings()
 
 
 # -----------------------------
-# Load Crop Docs
+# Load PDF Documents
 # -----------------------------
-def load_docs():
+def load_documents():
+
     docs = []
 
+    if not os.path.exists("docs"):
+        st.error("docs folder missing")
+        st.stop()
+
     for file in os.listdir("docs"):
+
         if file.endswith(".pdf"):
+
             loader = PyPDFLoader(f"docs/{file}")
             docs.extend(loader.load())
 
     return docs
 
 
-documents = load_docs()
+documents = load_documents()
 
+
+# -----------------------------
+# Split Documents
+# -----------------------------
 splitter = RecursiveCharacterTextSplitter(
     chunk_size=1000,
     chunk_overlap=200
@@ -67,7 +94,14 @@ splitter = RecursiveCharacterTextSplitter(
 
 chunks = splitter.split_documents(documents)
 
-db = FAISS.from_documents(chunks, embedding)
+
+# -----------------------------
+# Create Vector Database
+# -----------------------------
+db = FAISS.from_documents(
+    chunks,
+    embedding
+)
 
 
 # -----------------------------
@@ -77,21 +111,27 @@ def answer_query(query):
 
     docs = db.similarity_search(query, k=3)
 
-    context = "\n".join([doc.page_content for doc in docs])
+    context = "\n".join(
+        [doc.page_content for doc in docs]
+    )
 
     prompt = f"""
-    You are Kisan Saathi, an agriculture assistant for Indian farmers.
+    You are Kisan Saathi.
 
-    Use the crop advisory information below to answer simply.
+    Answer farmer questions simply.
 
-    Context:
+    Use this agriculture advisory context:
+
     {context}
 
     Farmer Question:
     {query}
 
-    Give short practical answer in simple language.
-    Hindi allowed if query is Hindi.
+    Rules:
+    - Give practical answer
+    - Keep answer short
+    - Hindi if question is Hindi
+    - Mention fertilizer/pest/irrigation clearly
     """
 
     response = model.generate_content(prompt)
@@ -100,18 +140,21 @@ def answer_query(query):
 
 
 # -----------------------------
-# UI
+# User Input
 # -----------------------------
-st.title("🌾 Agriculture Kisan Saathi")
-st.subheader("AI Crop Advisory Assistant for Indian Farmers")
-
 query = st.text_input(
     "Ask your farming question",
-    placeholder="गेहूं में कौन सा खाद डालें?"
+    placeholder="गेहूं में यूरिया कब डालें?"
 )
 
 if st.button("Ask"):
 
-    if query:
-        answer = answer_query(query)
+    if query.strip():
+
+        with st.spinner("Thinking..."):
+            answer = answer_query(query)
+
         st.success(answer)
+
+    else:
+        st.warning("Please enter question")
