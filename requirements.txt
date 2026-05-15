@@ -1,0 +1,5 @@
+streamlit
+google-generativeai
+langchain
+faiss-cpu
+pypdf
